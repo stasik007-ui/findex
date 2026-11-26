@@ -1,105 +1,70 @@
+from collections.abc import Iterator
+from dataclasses import dataclass
 import json
 import logging
-from collections.abc import Iterator
 from pathlib import Path
-from typing import NamedTuple
+from typing import cast
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
+
+SUPPORTED_TEXT_EXTS: frozenset[str] = frozenset({".txt", ".md", ".rst"})
 
 
-
-
-
-class Document(NamedTuple):
-
+@dataclass(frozen=True, slots=True)
+class Document:
     doc_id: str
-
     path: Path
-
     text: str
 
 
-
-
-
 def iter_documents(root: Path) -> Iterator[Document]:
-
-    """Ліниво віддає документи по одному з директорії .txt або з .jsonl-файлу."""
-
+    """Lazily yield Document objects from a directory or a single corpus file."""
     if not root.exists():
+        raise FileNotFoundError(f"Corpus path does not exist: {root}")
 
-        raise FileNotFoundError(f"Шлях до корпусу не знайдено: {root}")
-
-
-
-    if root.is_file() and root.suffix == ".jsonl":
-
-        yield from _iter_jsonl(root)
-
+    if root.is_file():
+        yield from _iter_single_file(root, root.parent)
         return
 
+    for file_path in sorted(p for p in root.rglob("*") if p.is_file()):
+        yield from _iter_single_file(file_path, root)
 
 
-    for file_path in root.rglob("*.txt"):
+def _iter_single_file(file_path: Path, base_dir: Path) -> Iterator[Document]:
+    suffix = file_path.suffix.lower()
+    rel_id = file_path.relative_to(base_dir).as_posix()
 
-        if not file_path.is_file():
-
-            continue
-
+    if suffix == ".jsonl":
         try:
+            with file_path.open("r", encoding="utf-8") as fh:
+                for line_no, raw_line in enumerate(fh, start=1):
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        parsed: object = json.loads(line)
+                    except json.JSONDecodeError:
+                        log.warning("Skipping malformed JSON at %s:%d", file_path, line_no)
+                        continue
+                    if not isinstance(parsed, dict):
+                        log.warning("Skipping non-object JSONL at %s:%d", file_path, line_no)
+                        continue
+                    record = cast(dict[str, object], parsed)
+                    text_val = record.get("text")
+                    if not isinstance(text_val, str):
+                        log.warning("Missing string 'text' field at %s:%d", file_path, line_no)
+                        continue
+                    id_val = record.get("id")
+                    doc_key = id_val if isinstance(id_val, str) else f"{rel_id}:{line_no}"
+                    yield Document(doc_id=doc_key, path=file_path, text=text_val)
+        except UnicodeDecodeError:
+            log.warning("Skipping undecodable JSONL file: %s", file_path)
+        return
 
-            text = file_path.read_text(encoding="utf-8", errors="strict")
-
-        except UnicodeDecodeError as exc:
-
-            logger.warning("Пропущено файл із некоректним UTF-8 (%s): %s", file_path, exc)
-
-            continue
-
-        except OSError as exc:
-
-            logger.warning("Помилка читання файлу (%s): %s", file_path, exc)
-
-            continue
-
-
-
-        doc_id = str(file_path.relative_to(root))
-
-        yield Document(doc_id=doc_id, path=file_path, text=text)
-
-
-
-
-
-def _iter_jsonl(jsonl_path: Path) -> Iterator[Document]:
-
-    """Потокове читання JSON-lines (один рядок = один документ із полем 'text')."""
-
-    with jsonl_path.open(encoding="utf-8", errors="replace") as f:
-
-        for line_num, line in enumerate(f, start=1):
-
-            line = line.strip()
-
-            if not line:
-
-                continue
-
-            try:
-
-                record = json.loads(line)
-
-            except json.JSONDecodeError as exc:
-
-                logger.warning("Невалідний JSON у %s:%d: %s", jsonl_path, line_num, exc)
-
-                continue
-
-
-
-            text = record.get("text", "")
-
-            doc_id = str(record.get("id", f"{jsonl_path.name}:{line_num}"))
-
-            yield Document(doc_id=doc_id, path=jsonl_path, text=text)
+    if suffix in SUPPORTED_TEXT_EXTS:
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            log.warning("Skipping undecodable text file: %s", file_path)
+            return
+        yield Document(doc_id=rel_id, path=file_path, text=text)

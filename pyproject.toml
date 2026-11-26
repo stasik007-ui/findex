@@ -1,20 +1,63 @@
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
 [project]
 name = "findex"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.4.0"
+description = "Full-text search engine CLI with BM25/TF-IDF ranking and boolean query language."
 readme = "README.md"
-authors = [
-    { name = "Stas Svasenko", email = "stasiksvasenko3@gmail.com" }
+requires-python = ">=3.12"
+dependencies = [
+    "rich>=13.9.0",
+    "typer>=0.12.5",
 ]
-requires-python = ">=3.15"
-dependencies = []
 
-[build-system]
-requires = ["uv_build>=0.13.10,<0.14.0"]
-build-backend = "uv_build"
+[project.scripts]
+findex = "findex.cli:app"
 
 [dependency-groups]
 dev = [
-    "pytest>=9.2.0",
-    "ruff>=0.17.6",
+    "hypothesis>=6.115.0",
+    "pyright>=1.1.390",
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.8.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/findex"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
+markers = [
+    "slow: tests that take longer than one second to execute",
+]
+
+[tool.coverage.run]
+source = ["findex"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
 ]

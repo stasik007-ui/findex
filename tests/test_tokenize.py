@@ -8,7 +8,11 @@ def test_is_generator_function() -> None:
 
 
 def test_mixed_case_and_german_eszett() -> None:
-    assert list(tokenize("Python STRASSE Stra\u00dfe")) == ["python", "strasse", "strasse"]
+    assert list(tokenize("Python STRASSE Stra\u00dfe")) == [
+        "python",
+        "strasse",
+        "strasse",
+    ]
 
 
 def test_cyrillic_and_apostrophes() -> None:
@@ -24,7 +28,13 @@ def test_unicode_combining_marks() -> None:
 
 def test_hyphens_and_digits() -> None:
     text = "HTTP-200 state-of-the-art v3_beta --dash--"
-    assert list(tokenize(text)) == ["http-200", "state-of-the-art", "v3", "beta", "dash"]
+    assert list(tokenize(text)) == [
+        "http-200",
+        "state-of-the-art",
+        "v3",
+        "beta",
+        "dash",
+    ]
 
 
 def test_punctuation_only() -> None:

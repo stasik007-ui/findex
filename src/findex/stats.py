@@ -1,162 +1,59 @@
-import argparse
-import time
-import tracemalloc
 from collections import Counter
-from itertools import islice
+from dataclasses import dataclass
 from pathlib import Path
 
 from findex.corpus import iter_documents
+from findex.index import Index
 from findex.tokenize import tokenize
 
 
-def run_lazy(root: Path, limit: int | None) -> tuple[int, int, Counter[str]]:
+@dataclass(frozen=True, slots=True)
+class IndexStats:
+    num_docs: int
+    unique_terms: int
+    total_tokens: int
+    avg_doc_length: float
+    hapax_count: int
+    hapax_ratio: float
+    top_terms: tuple[tuple[str, int, int], ...]  # (term, df, collection_tf)
 
-    """Потоковий однопрохідний конвеєр у константній пам'яті."""
 
-    docs = islice(iter_documents(root), limit)
+def compute_index_stats(index: Index, *, top_n: int = 10) -> IndexStats:
+    """Compute corpus and vocabulary statistics directly from a built Index."""
+    total_tokens = sum(index.doc_lengths.values())
+    collection_tf: dict[str, int] = {}
+    doc_freq: dict[str, int] = {}
 
-    counts: Counter[str] = Counter()
+    for term, plist in index.items():
+        doc_freq[term] = len(plist)
+        collection_tf[term] = sum(p.tf for p in plist)
 
+    hapax_count = sum(1 for tf in collection_tf.values() if tf == 1)
+    unique_terms = len(index)
+    hapax_ratio = (hapax_count / unique_terms) if unique_terms > 0 else 0.0
+
+    ranked_terms = sorted(
+        collection_tf.keys(),
+        key=lambda t: (-doc_freq[t], -collection_tf[t], t),
+    )[:top_n]
+    top_terms = tuple((t, doc_freq[t], collection_tf[t]) for t in ranked_terms)
+
+    return IndexStats(
+        num_docs=index.num_docs,
+        unique_terms=unique_terms,
+        total_tokens=total_tokens,
+        avg_doc_length=index.avg_doc_length,
+        hapax_count=hapax_count,
+        hapax_ratio=hapax_ratio,
+        top_terms=top_terms,
+    )
+
+
+def compute_corpus_stats(root: Path, *, top_n: int = 10) -> tuple[int, int, list[tuple[str, int]]]:
+    """Stream a raw corpus directory and compute (doc_count, total_tokens, top_terms)."""
     doc_count = 0
-
-    total_tokens = 0
-
-
-
-    for doc in docs:
-
+    counts: Counter[str] = Counter()
+    for doc in iter_documents(root):
         doc_count += 1
-
-        for token in tokenize(doc.text):
-
-            counts[token] += 1
-
-            total_tokens += 1
-
-
-
-    return doc_count, total_tokens, counts
-
-
-
-
-
-def run_eager(root: Path, limit: int | None) -> tuple[int, int, Counter[str]]:
-
-    """Навмисно жадібна версія (M4): вантажить усі документи й токени у списки."""
-
-    docs = list(islice(iter_documents(root), limit))
-
-    tokenized_docs = [list(tokenize(doc.text)) for doc in docs]
-
-    counts: Counter[str] = Counter(
-
-        token for doc_tokens in tokenized_docs for token in doc_tokens
-
-    )
-
-    doc_count = len(docs)
-
-    total_tokens = sum(len(doc_tokens) for doc_tokens in tokenized_docs)
-
-
-
-    return doc_count, total_tokens, counts
-
-
-
-
-
-def main() -> None:
-
-    parser = argparse.ArgumentParser(
-
-        description="Потоковий підрахунок статистики термів корпусу."
-
-    )
-
-    parser.add_argument("corpus", type=Path, help="Шлях до директорії корпусу або .jsonl")
-
-    parser.add_argument(
-
-        "--limit",
-
-        type=int,
-
-        default=None,
-
-        help="Обробити лише перші N документів (через itertools.islice)",
-
-    )
-
-    parser.add_argument(
-
-        "--eager",
-
-        action="store_true",
-
-        help="Використати жадібну реалізацію зі списками (для порівняння в M4)",
-
-    )
-
-    args = parser.parse_args()
-
-
-
-    tracemalloc.start()
-
-    start_time = time.perf_counter()
-
-
-
-    if args.eager:
-
-        doc_count, total_tokens, counts = run_eager(args.corpus, args.limit)
-
-        mode = "eager (lists)"
-
-    else:
-
-        doc_count, total_tokens, counts = run_lazy(args.corpus, args.limit)
-
-        mode = "lazy (generators)"
-
-
-
-    elapsed = time.perf_counter() - start_time
-
-    _, peak_bytes = tracemalloc.get_traced_memory()
-
-    tracemalloc.stop()
-
-
-
-    peak_mib = peak_bytes / (1024 * 1024)
-
-
-
-    print(f"Mode:            {mode}")
-
-    print(f"Documents:       {doc_count:,}")
-
-    print(f"Total tokens:    {total_tokens:,}")
-
-    print(f"Vocabulary size: {len(counts):,}")
-
-    print(f"Elapsed time:    {elapsed:.3f} s")
-
-    print(f"Peak memory:     {peak_mib:.2f} MiB ({peak_bytes:,} bytes)")
-
-    print("\nTop 50 terms:")
-
-    for rank, (term, freq) in enumerate(counts.most_common(50), start=1):
-
-        print(f"{rank:>2}. {term:<20} {freq:,}")
-
-
-
-
-
-if __name__ == "__main__":
-
-    main()
+        counts.update(tokenize(doc.text))
+    return doc_count, sum(counts.values()), counts.most_common(top_n)

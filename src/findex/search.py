@@ -1,239 +1,362 @@
-import argparseimport timeimport tracemallocfrom pathlib import Pathfrom findex.index import InvertedIndexfrom findex.store import loadfrom findex.tokenize import tokenizedef merge_and(a: list[int], b: list[int]) -> list[int]:
-    """Перетин двох відсортованих списків doc_id за O(len(a) + len(b))."""
-    result: list[int] = []
-    i = j = 0
-    while i < len(a) and j < len(b):
-        if a[i] == b[j]:
-            result.append(a[i])
-            i += 1
-            j += 1
-        elif a[i] < b[j]:
-            i += 1
-        else:
-            j += 1
-    return result
-
-
-def merge_or(a: list[int], b: list[int]) -> list[int]:
-    """Об'єднання двох відсортованих списків doc_id без дублікатів за O(len(a) + len(b))."""
-    result: list[int] = []
-    i = j = 0
-    while i < len(a) and j < len(b):
-        if a[i] == b[j]:
-            result.append(a[i])
-            i += 1
-            j += 1
-        elif a[i] < b[j]:
-            result.append(a[i])
-            i += 1
-        else:
-            result.append(b[j])
-            j += 1
-    if i < len(a):
-        result.extend(a[i:])
-    if j < len(b):
-        result.extend(b[j:])
-    return result
-
-
-def merge_not(a: list[int], b: list[int]) -> list[int]:
-    """Різниця відсортованих списків (a \\ b) за O(len(a) + len(b))."""
-    result: list[int] = []
-    i = j = 0
-    while i < len(a) and j < len(b):
-        if a[i] == b[j]:
-            i += 1
-            j += 1
-        elif a[i] < b[j]:
-            result.append(a[i])
-            i += 1
-        else:
-            j += 1
-    if i < len(a):
-        result.extend(a[i:])
-    return result
-
-
-def _parse_query_tokens(query: str) -> list[str]:
-    """Розбирає запит і вставляє неявний оператор AND між сусідніми термами."""
-    raw_parts = query.split()
-    tokens: list[str] = []
-    for part in raw_parts:
-        if part in {"AND", "OR", "NOT"}:
-            tokens.append(part)
-        else:
-            tokens.extend(tokenize(part))
-
-    normalized: list[str] = []
-    for tok in tokens:
-        if normalized:
-            prev = normalized[-1]
-            prev_is_term = prev not in {"AND", "OR", "NOT"}
-            curr_is_term_or_not = tok not in {"AND", "OR"}
-            if prev_is_term and curr_is_term_or_not:
-                normalized.append("AND")
-        normalized.append(tok)
-    return normalized
-
-
-def search(index: InvertedIndex, query: str, *, engine: str = "merge") -> list[int]:
-    """Виконує булевий пошук (AND, OR, NOT) за допомогою 'merge' або 'set'."""
-    if engine not in {"merge", "set"}:
-        raise ValueError(f"Непідтримуваний рушій пошуку: {engine}")
-
-    tokens = _parse_query_tokens(query)
-    if not tokens:
-        return []
-
-    all_docs = sorted(index.doc_meta.keys())
-
-    if engine == "set":
-        return _eval_set(index, tokens, all_docs)
-    return _eval_merge(index, tokens, all_docs)
-
-
-def _get_doc_ids(index: InvertedIndex, term: str) -> list[int]:
-    return [p.doc_id for p in index.postings.get(term, ())]
-
-
-def _eval_merge(index: InvertedIndex, tokens: list[str], all_docs: list[int]) -> list[int]:
-    current: list[int] | None = None
-    pending_op = "AND"
-    negate_next = False
-
-    for tok in tokens:
-        if tok in {"AND", "OR"}:
-            pending_op = tok
-        elif tok == "NOT":
-            negate_next = not negate_next
-        else:
-            rhs = _get_doc_ids(index, tok)
-            if current is None:
-                current = merge_not(all_docs, rhs) if negate_next else rhs
-            elif pending_op == "AND":
-                current = merge_not(current, rhs) if negate_next else merge_and(current, rhs)
-            else:
-                rhs_effective = merge_not(all_docs, rhs) if negate_next else rhs
-                current = merge_or(current, rhs_effective)
-            pending_op = "AND"
-            negate_next = False
-
-    return current or []
-
-
-def _eval_set(index: InvertedIndex, tokens: list[str], all_docs: list[int]) -> list[int]:
-    all_set = set(all_docs)
-    current: set[int] | None = None
-    pending_op = "AND"
-    negate_next = False
-
-    for tok in tokens:
-        if tok in {"AND", "OR"}:
-            pending_op = tok
-        elif tok == "NOT":
-            negate_next = not negate_next
-        else:
-            rhs = set(_get_doc_ids(index, tok))
-            if current is None:
-                current = (all_set - rhs) if negate_next else rhs
-            elif pending_op == "AND":
-                current = (current - rhs) if negate_next else (current & rhs)
-            else:
-                rhs_effective = (all_set - rhs) if negate_next else rhs
-                current = current | rhs_effective
-            pending_op = "AND"
-            negate_next = False
-
-    return sorted(current) if current is not None else []
-
-
-def run_benchmark(index: InvertedIndex, iterations: int = 1000) -> None:
-    """Порівнює швидкість merge та set на 2 найчастіших і 2 найрідкісніших термах."""
-    sorted_terms = sorted(index.postings.items(), key=lambda item: len(item[1]))
-    if len(sorted_terms) < 2:
-        print("Недостатньо термів в індексі для бенчмарку.")
-        return
-
-    rare_terms = [t for t, _ in sorted_terms[:2]]
-    common_terms = [t for t, _ in sorted_terms[-2:]]
-
-    queries = [
-        ("2 найчастіші терми (AND)", f"{common_terms[0]} AND {common_terms[1]}"),
-        ("2 найчастіші терми (OR)", f"{common_terms[0]} OR {common_terms[1]}"),
-        ("2 найрідкісніші терми (AND)", f"{rare_terms[0]} AND {rare_terms[1]}"),
-        ("2 найрідкісніші терми (OR)", f"{rare_terms[0]} OR {rare_terms[1]}"),
-    ]
-
-    print(f"Benchmark ({iterations} iterations per query):")
-    print(f"  Common terms: {common_terms} (df={[len(index.postings[t]) for t in common_terms]})")
-    print(f"  Rare terms:   {rare_terms} (df={[len(index.postings[t]) for t in rare_terms]})\n")
-
-    for label, q in queries:
-        t0 = time.perf_counter()
-        for _ in range(iterations):
-            res_merge = search(index, q, engine="merge")
-        t_merge = (time.perf_counter() - t0) * 1000
-
-        t0 = time.perf_counter()
-        for _ in range(iterations):
-            res_set = search(index, q, engine="set")
-        t_set = (time.perf_counter() - t0) * 1000
-
-        assert res_merge == res_set
-        print(
-            f"{label:<30} | hits={len(res_merge):<5} | "
-            f"merge={t_merge:7.2f} ms | set={t_set:7.2f} ms"
-        )
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Булевий пошук по інвертованому індексу.")
-    parser.add_argument("index_path", type=Path, help="Шлях до збереженого індексу")
-    parser.add_argument("query", nargs="?", default="", help="Пошуковий запит (AND/OR/NOT)")
-    parser.add_argument(
-        "--engine",
-        choices=("merge", "set"),
-        default="merge",
-        help="Алгоритм виконання запиту: merge або set",
-    )
-    parser.add_argument(
-        "--top",
-        type=int,
-        default=10,
-        help="Максимальна кількість результатів для виводу",
-    )
-    parser.add_argument(
-        "--benchmark",
-        action="store_true",
-        help="Запустити порівняння merge проти set на найчастіших і найрідкісніших термах",
-    )
-    args = parser.parse_args()
-
-    tracemalloc.start()
-    start_time = time.perf_counter()
-
-    index = load(args.index_path)
-
-    if args.benchmark:
-        run_benchmark(index)
-    else:
-        doc_ids = search(index, args.query, engine=args.engine)
-        elapsed = time.perf_counter() - start_time
-        _, peak_bytes = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
-
-        print(f"Query:       {args.query!r} (engine={args.engine})")
-        print(f"Matches:     {len(doc_ids):,}")
-        print(f"Elapsed:     {elapsed * 1000:.2f} ms")
-        print(f"Peak memory: {peak_bytes / (1024 * 1024):.2f} MiB\n")
-
-        for doc_id in doc_ids[: args.top]:
-            meta = index.doc_meta[doc_id]
-            print(f"[{doc_id:>4}] {meta.title} ({meta.source_id})")
-        return
-
-    tracemalloc.stop()
-
-
-if __name__ == "__main__":
+from __future__ import annotations
+
+import argparse
+import functools
+import heapq
+import itertools
+import json
+import logging
+import weakref
+from collections import defaultdict
+from operator import itemgetter
+from pathlib import Path
+
+from findex.ast import parse, positive_terms
+from findex.corpus import Document
+from findex.index import Index, build_index
+from findex.ranking import (
+    BM25,
+    ResultList,
+    Scorer,
+    SearchResult,
+    TfIdf,
+    make_snippet,
+    precision_at_k,
+)
+from findex.store import open_index
+from findex.utils import timed
+
+logger = logging.getLogger(__name__)
+
+
+class _IndexCacheKey:
+    """Hashable weak-reference key so lru_cache never leaks Index instances."""
+
+    def __init__(self, index: Index) -> None:
+        self._id = id(index)
+        self._ref = weakref.ref(index)
+
+    @property
+    def index(self) -> Index | None:
+        return self._ref()
+
+    def __hash__(self) -> int:
+        return hash(self._id)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _IndexCacheKey):
+            return False
+        return self._id == other._id and self._ref() is other._ref()
+
+
+def _score_term(scorer: Scorer, term: str, posting, index: Index) -> float:
+    if hasattr(scorer, "score"):
+        return scorer.score(term, posting, index)
+    if callable(scorer):
+        return scorer(term, posting, index)
+    raise TypeError(f"Invalid scorer: {scorer!r}")
+
+
+@functools.lru_cache(maxsize=256)
+def _cached_ranked_ids(
+    index_key: _IndexCacheKey,
+    query: str,
+    scorer: Scorer,
+    k: int,
+) -> tuple[tuple[int, float], ...]:
+    index = index_key.index
+    if index is None or k <= 0:
+        return ()
+
+    tree = parse(query)
+    if tree is None:
+        return ()
+
+    matched_docs = tree.evaluate(index)
+    if not matched_docs:
+        return ()
+
+    terms = positive_terms(tree)
+    if not terms:
+        return tuple((doc_id, 0.0) for doc_id in sorted(matched_docs)[:k])
+
+    scores: defaultdict[int, float] = defaultdict(float)
+    for term in terms:
+        if term not in index:
+            continue
+        for posting in index[term]:
+            if posting.doc_id in matched_docs:
+                scores[posting.doc_id] += _score_term(scorer, term, posting, index)
+
+    top_pairs = heapq.nlargest(k, scores.items(), key=itemgetter(1))
+    return tuple(top_pairs)
+
+
+def search_cache_info() -> functools._CacheInfo:
+    """Return lru_cache statistics for query evaluation."""
+    return _cached_ranked_ids.cache_info()
+
+
+def search_cache_hits() -> int:
+    """Return the number of cache hits accumulated by ranked searches."""
+    return _cached_ranked_ids.cache_info().hits
+
+
+def clear_search_cache() -> None:
+    """Clear the query result cache."""
+    _cached_ranked_ids.cache_clear()
+
+
+@timed
+def search(
+    index: Index,
+    query: str,
+    *,
+    scorer: Scorer = BM25(),
+    k: int = 10,
+    include_snippets: bool = True,
+    with_snippets: bool | None = None,
+) -> list[SearchResult]:
+    """Parse query, evaluate matching docs, rank with `scorer`, and return top-k."""
+    if with_snippets is not None:
+        include_snippets = with_snippets
+
+    before = _cached_ranked_ids.cache_info()
+    ranked_pairs = _cached_ranked_ids(_IndexCacheKey(index), query, scorer, k)
+    after = _cached_ranked_ids.cache_info()
+    if after.hits > before.hits:
+        logger.info("Cache HIT for query %r (%s)", query, after)
+    else:
+        logger.info("Cache MISS for query %r (%s)", query, after)
+
+    tree = parse(query)
+    terms = positive_terms(tree)
+
+    results: list[SearchResult] = []
+    for doc_id, doc_score in ranked_pairs:
+        meta = index.doc_meta[doc_id]
+        snippet = ""
+        if include_snippets:
+            snippet = _build_doc_snippet(index, doc_id, meta.path, meta.source_id, terms)
+        results.append(
+            SearchResult(
+                doc_id=doc_id,
+                score=doc_score,
+                title=meta.title,
+                snippet=snippet,
+            )
+        )
+    return ResultList(results)
+
+
+def boolean_search(index: Index, query: str) -> list[int]:
+    """Return matching document IDs in deterministic document order."""
+    tree = parse(query)
+    return sorted(tree.evaluate(index)) if tree is not None else []
+
+
+def _build_doc_snippet(
+    index: Index,
+    doc_id: int,
+    path_str: str,
+    source_id: str,
+    terms: list[str],
+) -> str:
+    positions: tuple[int, ...] = ()
+    for term in terms:
+        if term in index:
+            for posting in index[term]:
+                if posting.doc_id == doc_id and posting.positions:
+                    positions = posting.positions
+                    break
+        if positions:
+            break
+
+    path = Path(path_str)
+    if not path.is_file():
+        return ""
+
+    if path.suffix.lower() == ".jsonl":
+        raw_text = _read_jsonl_doc_text(path, source_id)
+    else:
+        try:
+            raw_text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+
+    return make_snippet(raw_text, terms, positions=positions, window=80)
+
+
+def _read_jsonl_doc_text(path: Path, source_id: str) -> str:
+    if ":" not in source_id:
+        return ""
+    _, _, line_str = source_id.rpartition(":")
+    if not line_str.isdigit():
+        return ""
+    line_idx = int(line_str) - 1
+    if line_idx < 0:
+        return ""
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            raw_line = next(itertools.islice(fh, line_idx, line_idx + 1), "")
+        if not raw_line:
+            return ""
+        record = json.loads(raw_line)
+        return str(
+            record.get("text") or record.get("content") or record.get("body") or ""
+        )
+    except (OSError, json.JSONDecodeError):
+        return ""
+
+
+def run_sanity_checks(index: Index) -> None:
+    """Demonstrate the three M2 ranking sanity checks."""
+    if len(index) < 2 or index.num_docs < 2:
+        print("Need at least 2 terms and 2 documents in the index for sanity checks.")
+        return
+
+    by_df = sorted(index.keys(), key=lambda t: index.df(t))
+    rare_term = by_df[0]
+    common_term = by_df[-1]
+
+    print("=== M2 Ranking Sanity Checks ===")
+    # 1. Rare term outranks common term
+    r_rare = search(
+        index,
+        f"{rare_term} OR {common_term}",
+        scorer=BM25(),
+        k=3,
+        include_snippets=False,
+    )
+    print(
+        f"1. Rare ({rare_term!r}, df={index.df(rare_term)}) "
+        f"vs Common ({common_term!r}, df={index.df(common_term)}):"
+    )
+    for r in r_rare:
+        print(f"   doc_id={r.doc_id} score={r.score:.4f} title={r.title!r}")
+
+    # 2. BM25 saturation
+    sat_docs = [
+        Document("tf1.txt", Path("tf1.txt"), "alpha beta gamma delta"),
+        Document("tf10.txt", Path("tf10.txt"), ("alpha " * 10) + "beta gamma delta"),
+        Document("tf20.txt", Path("tf20.txt"), ("alpha " * 20) + "beta gamma delta"),
+    ]
+    sat_idx = build_index(sat_docs)
+    bm25 = BM25()
+    s1 = bm25.score("alpha", sat_idx["alpha"][0], sat_idx)
+    s10 = bm25.score("alpha", sat_idx["alpha"][1], sat_idx)
+    s20 = bm25.score("alpha", sat_idx["alpha"][2], sat_idx)
+    print(
+        f"2. BM25 saturation: tf=1 -> {s1:.4f}, tf=10 -> {s10:.4f}, "
+        f"tf=20 -> {s20:.4f} (20th rep delta: {s20 - s10:.4f})"
+    )
+
+    # 3. Document length normalization
+    len_docs = [
+        Document("short.txt", Path("short.txt"), "needle in haystack"),
+        Document("long.txt", Path("long.txt"), "needle " + ("filler " * 60)),
+    ]
+    len_idx = build_index(len_docs)
+    len_res = search(len_idx, "needle", scorer=BM25(), k=2, include_snippets=False)
+    print(
+        f"3. Length normalization: short (len={len_idx.doc_length(0)}) "
+        f"score={len_res[0].score:.4f} vs long (len={len_idx.doc_length(1)}) "
+        f"score={len_res[1].score:.4f}"
+    )
+
+
+def evaluate_queries(index: Index, eval_file: Path) -> None:
+    """Compute Precision@5 for TF-IDF vs BM25 from {query: [relevant_doc_ids]} JSON."""
+    judgments: dict[str, list[int]] = json.loads(eval_file.read_text(encoding="utf-8"))
+    tfidf_scores: list[float] = []
+    bm25_scores: list[float] = []
+
+    print("| # | Query | TF-IDF P@5 | BM25 P@5 |")
+    print("| ---: | --- | ---: | ---: |")
+    for idx_num, (q, rel_list) in enumerate(judgments.items(), start=1):
+        rel_set = set(rel_list)
+        r_tfidf = [
+            r.doc_id
+            for r in search(index, q, scorer=TfIdf(), k=5, include_snippets=False)
+        ]
+        r_bm25 = [
+            r.doc_id
+            for r in search(index, q, scorer=BM25(), k=5, include_snippets=False)
+        ]
+        p_tfidf = precision_at_k(r_tfidf, rel_set, k=5)
+        p_bm25 = precision_at_k(r_bm25, rel_set, k=5)
+        tfidf_scores.append(p_tfidf)
+        bm25_scores.append(p_bm25)
+        print(f"| {idx_num} | `{q}` | {p_tfidf:.2f} | {p_bm25:.2f} |")
+
+    mean_tfidf = sum(tfidf_scores) / len(tfidf_scores) if tfidf_scores else 0.0
+    mean_bm25 = sum(bm25_scores) / len(bm25_scores) if bm25_scores else 0.0
+    print(
+        f"| **Mean** | **All {len(judgments)} queries** | "
+        f"**{mean_tfidf:.3f}** | **{mean_bm25:.3f}** |"
+    )
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        prog="python -m findex.search",
+        description="Ranked search with Boolean/phrase AST queries, TF-IDF/BM25, and snippets.",
+    )
+    parser.add_argument("index_path", type=Path, help="Path to saved index file")
+    parser.add_argument("query", nargs="?", default="", help="Search query")
+    parser.add_argument(
+        "--scorer",
+        choices=("bm25", "tfidf"),
+        default="bm25",
+        help="Relevance ranking model (default: bm25)",
+    )
+    parser.add_argument("-k", type=int, default=10, help="Number of results to return")
+    parser.add_argument(
+        "--sanity-checks",
+        action="store_true",
+        help="Run the three M2 ranking sanity checks",
+    )
+    parser.add_argument(
+        "--cache-demo",
+        action="store_true",
+        help="Run the query twice to demonstrate lru_cache hit in timing logs",
+    )
+    parser.add_argument(
+        "--eval",
+        type=Path,
+        default=None,
+        help="Path to JSON file with 10 hand-labeled queries for Precision@5 table",
+    )
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s [%(name)s]: %(message)s",
+    )
+    scorer: Scorer = BM25() if args.scorer == "bm25" else TfIdf()
+
+    with open_index(args.index_path) as index:
+        if args.sanity_checks:
+            run_sanity_checks(index)
+            return
+
+        if args.eval is not None:
+            evaluate_queries(index, args.eval)
+            return
+
+        results = search(index, args.query, scorer=scorer, k=args.k)
+        if args.cache_demo:
+            _ = search(index, args.query, scorer=scorer, k=args.k)
+            print(f"Cache stats: {search_cache_info()}")
+
+        print(f"Index:   {index!r}")
+        print(
+            f"Query:   {args.query!r} | Scorer: {type(scorer).__name__} | "
+            f"Hits: {len(results)}\n"
+        )
+        for res in results:
+            print(res)
+
+
+if __name__ == "__main__":
     main()
