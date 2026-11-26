@@ -34,6 +34,14 @@ def explain_query(node: QueryNode) -> str:
 
 
 __all__ = [
-    "And", "Not", "Or", "Phrase", "QueryNode", "Term", "explain_query",
-    "format_query", "parse", "positive_terms",
+    "And",
+    "Not",
+    "Or",
+    "Phrase",
+    "QueryNode",
+    "Term",
+    "explain_query",
+    "format_query",
+    "parse",
+    "positive_terms",
 ]

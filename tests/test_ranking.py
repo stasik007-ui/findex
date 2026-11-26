@@ -42,8 +42,12 @@ def test_search_caching_snippets_and_result_list(sample_index: Index) -> None:
     r_low = SearchResult(doc_id=1, score=0.2, title="A")
     r_high = SearchResult(doc_id=2, score=1.8, title="B")
     assert sorted([r_high, r_low]) == [r_low, r_high]
-    assert "BM25" in explain_score(BM25(), "generators", sample_index["generators"][0], sample_index)
-    assert "TfIdf" in explain_score(TfIdf(), "generators", sample_index["generators"][0], sample_index)
+    assert "BM25" in explain_score(
+        BM25(), "generators", sample_index["generators"][0], sample_index
+    )
+    assert "TfIdf" in explain_score(
+        TfIdf(), "generators", sample_index["generators"][0], sample_index
+    )
 
 
 def test_timed_decorator_preserves_metadata_and_logs(caplog: pytest.LogCaptureFixture) -> None:

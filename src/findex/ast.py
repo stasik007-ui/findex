@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from __future__ import annotations
-
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from findex.index import Index
+from findex.index import Index, Posting
 from findex.tokenize import tokenize
 
 
@@ -73,13 +71,13 @@ class Phrase(QueryNode):
                 "Phrase queries require positional postings. Rebuild index with --positions."
             )
 
-        posting_lists = [index[t] if t in index else [] for t in self.terms]
+        posting_lists: list[list[Posting]] = [index.get(t, []) for t in self.terms]
         if any(not pl for pl in posting_lists):
             return set()
 
-        candidate_docs = set.intersection(
-            *({p.doc_id for p in pl} for pl in posting_lists)
-        )
+        candidate_docs: set[int] = {p.doc_id for p in posting_lists[0]}
+        for postings in posting_lists[1:]:
+            candidate_docs.intersection_update(p.doc_id for p in postings)
         if not candidate_docs:
             return set()
 
@@ -247,9 +245,7 @@ def parse(query: str) -> QueryNode | None:
     while pos < len(query):
         match = _LEX_RE.match(query, pos)
         if not match:
-            raise SyntaxError(
-                f"Invalid query syntax near position {pos}: {query[pos:]!r}"
-            )
+            raise SyntaxError(f"Invalid query syntax near position {pos}: {query[pos:]!r}")
         pos = match.end()
         lparen, rparen, phrase, word = match.groups()
         if lparen is not None:

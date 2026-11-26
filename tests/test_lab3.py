@@ -5,7 +5,7 @@ import pytest
 from findex.index import Index, build_index, open_index
 from findex.query import And, Not, Or, Phrase, Term, explain_query, parse
 from findex.ranking import BM25, ResultList, Scorer, SearchResult, TfIdf, explain_score
-from findex.search import _cached_ranked_ids, search
+from findex.search import _cached_ranked_ids, search  # pyright: ignore[reportPrivateUsage]
 from findex.store import save
 
 

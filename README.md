@@ -122,3 +122,85 @@ The Lab 3 test module passes:
 ```text
 uv run pytest tests/test_lab3.py -q
 ... [100%]
+```
+
+---
+
+## Lab 04 — Typing, Testing, Packaging & CLI
+
+Lab 4 turns `findex` into an installable, typed command-line tool.
+
+[![CI](https://github.com/stasik007-ui/findex/actions/workflows/ci.yml/badge.svg)](https://github.com/stasik007-ui/findex/actions/workflows/ci.yml)
+
+### CLI
+
+The package exposes the `findex` command through the `findex.cli:app` entry point:
+
+```powershell
+findex --help
+findex --version
+findex index <corpus> --out <file> --positions
+findex search <index> "python AND search" --scorer bm25 --k 10
+findex search <index> "python" --json
+findex stats <index>
+```
+
+The `index` command builds an index with an optional progress display. The
+`search` command supports BM25 and TF-IDF, Rich tables, snippets, and JSON
+Lines output. The `stats` command displays document, term, token, and hapax
+statistics. Expected errors are reported to stderr with a non-zero exit code.
+
+The root `-v` and `-vv` options configure logging at INFO and DEBUG levels.
+
+### Type checking and quality gates
+
+The project uses strict Pyright, Ruff linting, and Ruff formatting:
+
+```powershell
+uv run pyright src tests
+uv run ruff check src tests
+uv run ruff format --check src tests
+```
+
+All three checks pass for the current Lab 4 implementation.
+
+### Tests and coverage
+
+Shared fixtures are defined in `tests/conftest.py`. The suite covers index
+protocols, serialization, Boolean and phrase queries, ranking, snippets,
+Hypothesis properties, the CLI, and error handling.
+
+```powershell
+uv run pytest -q
+uv run pytest --cov=findex --cov-report=term-missing
+```
+
+Current result: **40 tests passed** and **69% total coverage**. The remaining
+uncovered code is primarily optional benchmark, corpus error, and CLI display
+branches.
+
+### Packaging
+
+The project uses the `src/` layout, PEP 621 metadata, a locked `uv`
+environment, and a `findex` console-script entry point. Build and verify the
+artifacts with:
+
+```powershell
+uv sync --link-mode=copy
+uv build
+uvx --from .\dist\findex-0.4.0-py3-none-any.whl findex --help
+```
+
+The generated artifacts are `dist/findex-0.4.0.tar.gz` and
+`dist/findex-0.4.0-py3-none-any.whl`. IDE, virtual-environment, test-cache,
+and build directories are excluded from source distributions and Git.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request:
+
+1. `uv sync --locked`;
+2. `ruff check`;
+3. `ruff format --check`;
+4. `pyright`;
+5. `pytest` with coverage.

@@ -1,12 +1,11 @@
-from collections.abc import Iterator
 import re
 import unicodedata
+from collections.abc import Iterator
 
-
-_TOKEN_RE = re.compile(r"[^\W_]+(?:['\u2019-][^\W_]+)*", re.UNICODE)
+TOKEN_PATTERN: re.Pattern[str] = re.compile(r"[^\W_]+(?:['\u2019-][^\W_]+)*", re.UNICODE)
 
 
 def tokenize(text: str) -> Iterator[str]:
     """Yield normalized word-like tokens without materializing the input."""
     normalized = unicodedata.normalize("NFC", text).casefold()
-    yield from (match.group(0) for match in _TOKEN_RE.finditer(normalized))
+    yield from (match.group(0) for match in TOKEN_PATTERN.finditer(normalized))

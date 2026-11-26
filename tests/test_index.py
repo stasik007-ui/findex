@@ -1,8 +1,9 @@
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
-from hypothesis import given, strategies as st
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from findex.corpus import iter_documents
 from findex.index import DocMeta, Index, Posting, build_index, open_index

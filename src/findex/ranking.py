@@ -5,7 +5,7 @@ import re
 import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Protocol, SupportsIndex, cast, overload, runtime_checkable
 
 from findex.index import Index, Posting
 
@@ -29,12 +29,20 @@ class SearchResult:
 class ResultList(list[SearchResult]):
     """A result list whose slices remain result lists."""
 
-    def __getitem__(self, item):
+    @overload
+    def __getitem__(self, item: SupportsIndex) -> SearchResult: ...
+
+    @overload
+    def __getitem__(self, item: slice) -> ResultList: ...
+
+    def __getitem__(self, item: SupportsIndex | slice) -> SearchResult | ResultList:  # pyright: ignore[reportIncompatibleMethodOverride]
         value = super().__getitem__(item)
-        return ResultList(value) if isinstance(item, slice) else value
+        if isinstance(item, slice):
+            return ResultList(cast(list[SearchResult], value))
+        return cast(SearchResult, value)
 
     def __repr__(self) -> str:
-        return f"ResultList({list.__repr__(self)})"
+        return f"ResultList({super().__repr__()})"
 
 
 @runtime_checkable

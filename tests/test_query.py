@@ -1,5 +1,6 @@
-from hypothesis import given, strategies as st
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from findex.index import Index
 from findex.query import And, Not, Or, Phrase, QueryNode, Term, explain_query, format_query, parse
@@ -71,9 +72,7 @@ def test_property_query_format_parse_roundtrip(ast: QueryNode) -> None:
 
 
 @given(_WORD_STRATEGY, _WORD_STRATEGY)
-def test_property_boolean_oracle_matches_python_sets(
-    sample_index: Index, t1: str, t2: str
-) -> None:
+def test_property_boolean_oracle_matches_python_sets(sample_index: Index, t1: str, t2: str) -> None:
     s1 = {p.doc_id for p in sample_index.get(t1, ())}
     s2 = {p.doc_id for p in sample_index.get(t2, ())}
     assert And(Term(t1), Term(t2)).evaluate(sample_index) == (s1 & s2)

@@ -1,9 +1,9 @@
 import argparse
-from dataclasses import dataclass
-from pathlib import Path
 import tempfile
 import time
 import tracemalloc
+from dataclasses import dataclass
+from pathlib import Path
 
 from findex.corpus import iter_documents
 from findex.index import build_index

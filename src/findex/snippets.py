@@ -1,7 +1,7 @@
-from collections.abc import Callable
-from pathlib import Path
 import re
 import unicodedata
+from collections.abc import Callable
+from pathlib import Path
 
 from findex.index import DocMeta
 from findex.tokenize import TOKEN_PATTERN
@@ -75,7 +75,7 @@ def _highlight_terms(
     right_delim: str = "]",
     escape_fn: Callable[[str], str] | None = None,
 ) -> str:
-    escape = escape_fn if escape_fn is not None else lambda s: s
+    escape: Callable[[str], str] = escape_fn if escape_fn is not None else lambda s: s
     if not terms:
         return escape(fragment)
 

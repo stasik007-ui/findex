@@ -10,7 +10,7 @@ R = TypeVar("R")
 timing_logger = logging.getLogger("findex.timing")
 
 
-def timed(fn: Callable[P, R]) -> Callable[P, R]:
+def timed[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
     """Log wall-clock execution time of a function call in milliseconds."""
 
     @functools.wraps(fn)

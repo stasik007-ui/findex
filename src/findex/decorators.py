@@ -1,7 +1,7 @@
-from collections.abc import Callable
 import functools
 import logging
 import time
+from collections.abc import Callable
 
 log = logging.getLogger(__name__)
 

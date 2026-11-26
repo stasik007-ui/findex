@@ -1,5 +1,5 @@
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 from findex.index import build_index
 from findex.ranking import BM25, TfIdf
@@ -14,9 +14,7 @@ def run_sanity_checks() -> tuple[float, float, float]:
             (root / f"common_{i}.txt").write_text(
                 f"Doc {i}\npython language tutorial guide", encoding="utf-8"
             )
-        (root / "rare.txt").write_text(
-            "Rare Doc\npython bm25 ranking algorithm", encoding="utf-8"
-        )
+        (root / "rare.txt").write_text("Rare Doc\npython bm25 ranking algorithm", encoding="utf-8")
         (root / "rust_1.txt").write_text("Rust 1\nrust systems", encoding="utf-8")
         (root / "rust_20.txt").write_text(
             "Rust 20\n" + ("rust " * 20) + "systems", encoding="utf-8"

@@ -10,10 +10,11 @@ import weakref
 from collections import defaultdict
 from operator import itemgetter
 from pathlib import Path
+from typing import NamedTuple
 
 from findex.ast import parse, positive_terms
 from findex.corpus import Document
-from findex.index import Index, build_index
+from findex.index import Index, Posting, build_index
 from findex.ranking import (
     BM25,
     ResultList,
@@ -27,6 +28,7 @@ from findex.store import open_index
 from findex.utils import timed
 
 logger = logging.getLogger(__name__)
+DEFAULT_SCORER = BM25()
 
 
 class _IndexCacheKey:
@@ -49,12 +51,15 @@ class _IndexCacheKey:
         return self._id == other._id and self._ref() is other._ref()
 
 
-def _score_term(scorer: Scorer, term: str, posting, index: Index) -> float:
-    if hasattr(scorer, "score"):
-        return scorer.score(term, posting, index)
-    if callable(scorer):
-        return scorer(term, posting, index)
-    raise TypeError(f"Invalid scorer: {scorer!r}")
+class CacheInfo(NamedTuple):
+    hits: int
+    misses: int
+    maxsize: int | None
+    currsize: int
+
+
+def _score_term(scorer: Scorer, term: str, posting: Posting, index: Index) -> float:
+    return scorer.score(term, posting, index)
 
 
 @functools.lru_cache(maxsize=256)
@@ -92,9 +97,10 @@ def _cached_ranked_ids(
     return tuple(top_pairs)
 
 
-def search_cache_info() -> functools._CacheInfo:
+def search_cache_info() -> CacheInfo:
     """Return lru_cache statistics for query evaluation."""
-    return _cached_ranked_ids.cache_info()
+    info = _cached_ranked_ids.cache_info()
+    return CacheInfo(info.hits, info.misses, info.maxsize, info.currsize)
 
 
 def search_cache_hits() -> int:
@@ -112,7 +118,7 @@ def search(
     index: Index,
     query: str,
     *,
-    scorer: Scorer = BM25(),
+    scorer: Scorer = DEFAULT_SCORER,
     k: int = 10,
     include_snippets: bool = True,
     with_snippets: bool | None = None,
@@ -202,9 +208,7 @@ def _read_jsonl_doc_text(path: Path, source_id: str) -> str:
         if not raw_line:
             return ""
         record = json.loads(raw_line)
-        return str(
-            record.get("text") or record.get("content") or record.get("body") or ""
-        )
+        return str(record.get("text") or record.get("content") or record.get("body") or "")
     except (OSError, json.JSONDecodeError):
         return ""
 
@@ -275,14 +279,8 @@ def evaluate_queries(index: Index, eval_file: Path) -> None:
     print("| ---: | --- | ---: | ---: |")
     for idx_num, (q, rel_list) in enumerate(judgments.items(), start=1):
         rel_set = set(rel_list)
-        r_tfidf = [
-            r.doc_id
-            for r in search(index, q, scorer=TfIdf(), k=5, include_snippets=False)
-        ]
-        r_bm25 = [
-            r.doc_id
-            for r in search(index, q, scorer=BM25(), k=5, include_snippets=False)
-        ]
+        r_tfidf = [r.doc_id for r in search(index, q, scorer=TfIdf(), k=5, include_snippets=False)]
+        r_bm25 = [r.doc_id for r in search(index, q, scorer=BM25(), k=5, include_snippets=False)]
         p_tfidf = precision_at_k(r_tfidf, rel_set, k=5)
         p_bm25 = precision_at_k(r_bm25, rel_set, k=5)
         tfidf_scores.append(p_tfidf)
@@ -350,10 +348,7 @@ def main(argv: list[str] | None = None) -> None:
             print(f"Cache stats: {search_cache_info()}")
 
         print(f"Index:   {index!r}")
-        print(
-            f"Query:   {args.query!r} | Scorer: {type(scorer).__name__} | "
-            f"Hits: {len(results)}\n"
-        )
+        print(f"Query:   {args.query!r} | Scorer: {type(scorer).__name__} | Hits: {len(results)}\n")
         for res in results:
             print(res)
 

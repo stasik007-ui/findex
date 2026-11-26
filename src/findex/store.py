@@ -4,8 +4,7 @@ import json
 import pickle
 import struct
 from array import array
-from contextlib import contextmanager
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -111,13 +110,10 @@ def load(path: Path | str, fmt: str | None = None) -> Index:
         for term, entries in raw["postings"].items():
             if include_positions:
                 postings[term] = [
-                    Posting(doc_id=int(e[0]), tf=int(e[1]), positions=tuple(e[2]))
-                    for e in entries
+                    Posting(doc_id=int(e[0]), tf=int(e[1]), positions=tuple(e[2])) for e in entries
                 ]
             else:
-                postings[term] = [
-                    Posting(doc_id=int(e[0]), tf=int(e[1])) for e in entries
-                ]
+                postings[term] = [Posting(doc_id=int(e[0]), tf=int(e[1])) for e in entries]
         return Index(
             postings=postings,
             doc_lengths=doc_lengths,
@@ -128,21 +124,11 @@ def load(path: Path | str, fmt: str | None = None) -> Index:
     if chosen == "binary":
         return _load_binary(path)
 
-
-@contextmanager
-def open_index(path: Path | str, fmt: IndexFormat | None = None):
-    """Load an index and always release it when leaving the context."""
-    index = load(Path(path), fmt=fmt)
-    try:
-        yield index
-    finally:
-        index.close()
-
     raise ValueError(f"Unsupported index format: {chosen!r}")
 
 
 @contextmanager
-def open_index(path: Path | str, fmt: str | None = None) -> Iterator[Index]:
+def open_index(path: Path | str, fmt: str | None = None) -> Generator[Index, None, None]:
     """Context manager that loads an Index and guarantees cleanup on exit."""
     index = load(Path(path), fmt=fmt)
     try:
@@ -171,8 +157,7 @@ def _save_binary(index: Index, path: Path) -> None:
         "include_positions": index.include_positions,
         "doc_lengths": {str(k): v for k, v in index.doc_lengths.items()},
         "doc_meta": {
-            str(k): [m.doc_id, m.path, m.title, m.source_id]
-            for k, m in index.doc_meta.items()
+            str(k): [m.doc_id, m.path, m.title, m.source_id] for k, m in index.doc_meta.items()
         },
         "terms": term_dir,
         "total_postings": len(doc_ids_buf),

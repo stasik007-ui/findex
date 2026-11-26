@@ -28,6 +28,16 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/findex"]
 
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/.vs/",
+    "/.hypothesis/",
+    "/.pytest_cache/",
+    "/.ruff_cache/",
+    "/.venv/",
+    "/dist/",
+]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100
