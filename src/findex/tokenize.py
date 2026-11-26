@@ -1,8 +1,4 @@
-from collections.abc import Iterator
-import re
-import unicodedata
-
-# Зберігаємо слова та числа, включно зі словами з внутрішніми апострофами або дефісами.
+import reimport unicodedatafrom collections.abc import Iterator# Зберігаємо слова та числа, включно зі словами з внутрішніми апострофами або дефісами.
 # Символи підкреслення (_) та крайня пунктуація ігноруються.
 TOKEN_PATTERN = re.compile(r"[^\W_]+(?:['’\-][^\W_]+)*", re.UNICODE)
 

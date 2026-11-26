@@ -1,4 +1,5 @@
 import inspect
+
 from findex.tokenize import tokenize
 
 
